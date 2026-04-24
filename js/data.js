@@ -1,12 +1,20 @@
 // ============================================================
 // MANG'IT CUP 2026 — Tournament Data Store
+// Backend: Firebase Realtime Database
+// localStorage faqat offline fallback sifatida ishlatiladi
 // ============================================================
 
 const TournamentData = {
   name: "MANG'IT CUP",
   season: "2026",
 
-  matches: [
+  // Firebase reference (firebase-config.js dan o'rnatiladi)
+  _db: null,
+  _dbRef: null,
+  _listeners: [],
+
+  // Default match structure (birinchi yuklashda Firebase bo'sh bo'lsa ishlatiladi)
+  _defaultMatches: [
     // RIGHT HALF 1/16
     { id:"R-R16-1", round:"1/16", half:"right", group:"top",    date:"", team1:"2009",   team2:"-",      score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
     { id:"R-R16-2", round:"1/16", half:"right", group:"top",    date:"", team1:"1996",   team2:"1994",   score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
@@ -49,34 +57,112 @@ const TournamentData = {
     { id:"SF-LEFT", round:"1/2",  half:"left",  group:"",       date:"", team1:"",       team2:"",       score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
   ],
 
+  matches: [], // live copy, populated from Firebase or defaults
+
   admin: { user:"admin", pass:"mangitcup2026" },
 
-  getMatch(id){ return this.matches.find(m => m.id === id); },
+  // ── Firebase init ──────────────────────────────────────
+  // Called from index.html after Firebase SDK loads
+  initFirebase() {
+    try {
+      firebase.initializeApp(FIREBASE_CONFIG);
+      this._db    = firebase.database();
+      this._dbRef = this._db.ref(DB_PATH);
+      console.log("✅ Firebase connected");
+      return true;
+    } catch(e) {
+      console.warn("⚠️ Firebase init failed:", e.message);
+      return false;
+    }
+  },
 
-  winner(m){
+  // ── Load: Firebase → local, with offline fallback ─────
+  load(onReady) {
+    // Try Firebase first
+    if(this._dbRef) {
+      // Real-time listener — updates UI whenever data changes
+      this._dbRef.on("value", (snapshot) => {
+        const data = snapshot.val();
+        if(data && Array.isArray(data) && data.length > 0) {
+          this.matches = this._migrate(data);
+        } else {
+          // Firebase empty → seed with defaults
+          this.matches = this._cloneDefaults();
+          this._dbRef.set(this.matches);
+        }
+        // Save a local cache for offline
+        localStorage.setItem("mangitcup_cache", JSON.stringify(this.matches));
+        if(onReady) onReady();
+      }, (err) => {
+        console.warn("Firebase read error:", err);
+        this._loadLocalFallback(onReady);
+      });
+    } else {
+      this._loadLocalFallback(onReady);
+    }
+  },
+
+  _loadLocalFallback(onReady) {
+    const cached = localStorage.getItem("mangitcup_cache")
+                || localStorage.getItem("mangitcup2026")
+                || localStorage.getItem("mangitcup");
+    this.matches = cached ? this._migrate(JSON.parse(cached)) : this._cloneDefaults();
+    if(onReady) onReady();
+  },
+
+  _cloneDefaults() {
+    return JSON.parse(JSON.stringify(this._defaultMatches));
+  },
+
+  _migrate(arr) {
+    arr.forEach(m => {
+      if(m.pen1       === undefined) m.pen1       = null;
+      if(m.pen2       === undefined) m.pen2       = null;
+      if(m.bestPlayer === undefined) m.bestPlayer = null;
+      if(!m.scorers)                 m.scorers    = [];
+    });
+    return arr;
+  },
+
+  // ── Save: write to Firebase (all users see it instantly) ─
+  save() {
+    // Always cache locally too (offline support)
+    localStorage.setItem("mangitcup_cache", JSON.stringify(this.matches));
+
+    if(this._dbRef) {
+      this._dbRef.set(this.matches)
+        .then(()  => console.log("✅ Saved to Firebase"))
+        .catch(e  => console.warn("Firebase write error:", e));
+    }
+  },
+
+  // ── Helpers (same as before) ───────────────────────────
+  getMatch(id) { return this.matches.find(m => m.id === id); },
+
+  winner(m) {
     if(!m.played || m.score1===null || m.score2===null) return null;
     if(m.team2==="-") return m.team1;
     if(m.score1>m.score2) return m.team1;
     if(m.score2>m.score1) return m.team2;
-    if(m.pen1!==null && m.pen2!==null){
+    if(m.pen1!==null && m.pen2!==null) {
       if(m.pen1>m.pen2) return m.team1;
       if(m.pen2>m.pen1) return m.team2;
     }
     return null;
   },
 
-  topScorers(){
+  topScorers() {
     const map = {};
     this.matches.forEach(m => {
-      m.scorers.forEach(s => {
-        if(!map[s.player]) map[s.player]={player:s.player, team:s.team, goals:0};
+      (m.scorers||[]).forEach(s => {
+        if(!map[s.player]) map[s.player]={player:s.player,team:s.team,goals:0};
         map[s.player].goals++;
       });
     });
     return Object.values(map).sort((a,b)=>b.goals-a.goals);
   },
 
-  mvpList(){
+  mvpList() {
     return this.matches
       .filter(m => m.bestPlayer && m.bestPlayer.name)
       .map(m => ({
@@ -89,31 +175,16 @@ const TournamentData = {
       .sort((a,b)=>b.rating-a.rating);
   },
 
-  todaysMatches(){
+  todaysMatches() {
     const todayStr = new Date().toISOString().slice(0,10);
-    return this.matches.filter(m=>
+    return this.matches.filter(m =>
       m.date && m.team1 && m.team2 && m.team2!=="-" && m.date.slice(0,10)===todayStr
     );
   },
 
-  scheduledMatches(){
+  scheduledMatches() {
     return this.matches
       .filter(m=>m.date && m.team1 && m.team2 && m.team2!=="-")
       .sort((a,b)=>new Date(a.date)-new Date(b.date));
   },
-
-  save(){ localStorage.setItem("mangitcup2026", JSON.stringify(this.matches)); },
-
-  load(){
-    const saved = localStorage.getItem("mangitcup2026")||localStorage.getItem("mangitcup");
-    if(saved){
-      const parsed = JSON.parse(saved);
-      parsed.forEach(m=>{
-        if(m.pen1===undefined)      m.pen1=null;
-        if(m.pen2===undefined)      m.pen2=null;
-        if(m.bestPlayer===undefined) m.bestPlayer=null;
-      });
-      this.matches=parsed;
-    }
-  }
 };

@@ -5,14 +5,46 @@
 
 // ── INIT ──────────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
-  TournamentData.load();
   initTheme();
-  propagateWinners();
-  renderAll();
   setupNav();
   setupAdmin();
   setupModal();
+
+  showLoadingOverlay(true);
+
+  // Firebase is initialised in index.html <head> before scripts load.
+  // TournamentData.load() calls onReady when data first arrives from Firebase.
+  TournamentData.load(() => {
+    propagateWinners();
+    renderAll();
+    showLoadingOverlay(false);
+    updateConnectionBadge(!!TournamentData._dbRef);
+  });
+
+  window.addEventListener("online",  () => updateConnectionBadge(!!TournamentData._dbRef));
+  window.addEventListener("offline", () => updateConnectionBadge(false, true));
 });
+
+function showLoadingOverlay(show) {
+  const el = document.getElementById("loading-overlay");
+  if(el) el.style.display = show ? "flex" : "none";
+}
+
+function updateConnectionBadge(connected, offline) {
+  const badge = document.getElementById("conn-badge");
+  if(!badge) return;
+  if(offline) {
+    badge.textContent = "📵 Offline";
+    badge.style.cssText = "background:rgba(231,76,60,0.2);border:1px solid rgba(231,76,60,0.4);color:#e74c3c;padding:2px 10px;border-radius:12px;font-size:0.75rem;font-family:'Rajdhani',sans-serif;font-weight:700;";
+  } else if(connected) {
+    badge.textContent = "🟢 Real-time";
+    badge.style.cssText = "background:rgba(46,204,113,0.15);border:1px solid rgba(46,204,113,0.3);color:#2ecc71;padding:2px 10px;border-radius:12px;font-size:0.75rem;font-family:'Rajdhani',sans-serif;font-weight:700;";
+  } else {
+    badge.textContent = "🔶 Lokal rejim";
+    badge.style.cssText = "background:rgba(245,197,24,0.15);border:1px solid rgba(245,197,24,0.3);color:#f5c518;padding:2px 10px;border-radius:12px;font-size:0.75rem;font-family:'Rajdhani',sans-serif;font-weight:700;";
+  }
+  badge.style.display = "inline-block";
+}
 
 // ── THEME ─────────────────────────────────────────────────
 function initTheme() {
