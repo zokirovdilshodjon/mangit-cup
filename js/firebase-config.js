@@ -12,5 +12,4 @@ const FIREBASE_CONFIG = {
   appId:             "1:305703376037:web:9018ec183a5a67455ce94c",
   measurementId:     "G-P9F3K1X3HJ"
 };
-
 const DB_PATH = "mangitcup2026/matches";
