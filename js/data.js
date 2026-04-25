@@ -42,9 +42,9 @@ const TournamentData = {
     { id:"L-R16-3", round:"1/16", half:"left",  group:"top",    date:"", team1:"2007",   team2:"-",      score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
     { id:"L-R16-4", round:"1/16", half:"left",  group:"top",    date:"", team1:"1998",   team2:"2006",   score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
     { id:"L-R16-5", round:"1/16", half:"left",  group:"bottom", date:"", team1:"2003",   team2:"1991",   score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
-    { id:"L-R16-6", round:"1/16", half:"left",  group:"bottom", date:"", team1:"1999",   team2:"-",      score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
+    { id:"L-R16-6", round:"1/16", half:"left",  group:"bottom", date:"", team1:"99&04",   team2:"-",      score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
     { id:"L-R16-7", round:"1/16", half:"left",  group:"bottom", date:"", team1:"2001",   team2:"2008",   score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
-    { id:"L-R16-8", round:"1/16", half:"left",  group:"bottom", date:"", team1:"2004",   team2:"-",      score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
+    { id:"L-R16-8", round:"1/16", half:"left",  group:"bottom", date:"", team1:"Ustozlar",   team2:"-",      score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
     // LEFT HALF 1/8
     { id:"L-R8-1",  round:"1/8",  half:"left",  group:"top",    date:"", team1:"XOMIY",  team2:"",       score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
     { id:"L-R8-2",  round:"1/8",  half:"left",  group:"top",    date:"", team1:"2007",   team2:"",       score1:null, score2:null, pen1:null, pen2:null, played:false, scorers:[], bestPlayer:null },
@@ -78,10 +78,22 @@ const TournamentData = {
 
   // ── Load: Firebase → local, with offline fallback ─────
   load(onReady) {
-    // Try Firebase first
+    // Safety timeout — if Firebase doesn't respond in 6s, fall back to local
+    let resolved = false;
+    const fallbackTimer = setTimeout(() => {
+      if(!resolved) {
+        resolved = true;
+        console.warn("Firebase timeout — switching to localStorage fallback");
+        this._loadLocalFallback(onReady);
+      }
+    }, 6000);
+
     if(this._dbRef) {
-      // Real-time listener — updates UI whenever data changes
       this._dbRef.on("value", (snapshot) => {
+        clearTimeout(fallbackTimer);
+        if(resolved) return; // already resolved by timeout
+        resolved = true;
+
         const data = snapshot.val();
         if(data && Array.isArray(data) && data.length > 0) {
           this.matches = this._migrate(data);
@@ -90,14 +102,18 @@ const TournamentData = {
           this.matches = this._cloneDefaults();
           this._dbRef.set(this.matches);
         }
-        // Save a local cache for offline
         localStorage.setItem("mangitcup_cache", JSON.stringify(this.matches));
         if(onReady) onReady();
       }, (err) => {
+        clearTimeout(fallbackTimer);
+        if(resolved) return;
+        resolved = true;
         console.warn("Firebase read error:", err);
         this._loadLocalFallback(onReady);
       });
     } else {
+      clearTimeout(fallbackTimer);
+      resolved = true;
       this._loadLocalFallback(onReady);
     }
   },
